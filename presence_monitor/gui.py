@@ -17,10 +17,17 @@ from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Callable
 
-from face_service.config import Config, CONFIG_PATH, LOG_PATH, PRESENCE_MODES
+import os
+
+import win32con  # type: ignore
+import win32security  # type: ignore
+
+from face_service.config import Config, CONFIG_PATH, CREDS_PATH, LOG_PATH, PRESENCE_MODES
+from face_service.credentials import clear_password, save_password
 from face_service.i18n import LANGUAGES, get_language, set_language, t
 
 from .monitor import PresenceMonitor, pipe_call
+from .theme import apply_theme
 from .widgets import InfoButton, Tooltip, attach_tooltip
 
 log = logging.getLogger(__name__)
@@ -67,6 +74,7 @@ class StatusWindow:
         self.root = tk.Tk()
         self.root.title(t("status.title"))
         self.root.geometry("560x480")
+        apply_theme(self.root)
         self._build()
         self._refresh_loop()
 
@@ -192,11 +200,13 @@ class SettingsWindow:
         self.monitor = monitor
         self.on_saved = on_saved
         self.root = tk.Tk()
+        apply_theme(self.root)
         self.root.title(t("settings.title"))
-        self.root.geometry("620x620")
         self.cfg = Config.load()
         self.widgets: dict[str, tuple[str, tk.Variable]] = {}
         self._build()
+        # No geometry: with DPI awareness declared in presence_monitor/__init__
+        # Tk's requested size is correct, so the window fits its own content.
 
     def _build(self) -> None:
         frm = ttk.Frame(self.root, padding=12)
@@ -205,7 +215,6 @@ class SettingsWindow:
         ttk.Label(
             frm,
             text=t("settings.editing", path=str(CONFIG_PATH)),
-            foreground="#555",
             wraplength=560,
         ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
@@ -344,6 +353,7 @@ HELP_ENTRIES = [
     ("tray.probe", "tray.probe.desc"),
     ("tray.pause", "tray.pause.desc"),
     ("tray.enroll", "tray.enroll.desc"),
+    ("tray.wizard", "tray.wizard.desc"),
     ("tray.set_password", "tray.set_password.desc"),
     ("tray.open_log", "tray.open_log.desc"),
     ("tray.language", "tray.language.desc"),
@@ -359,7 +369,8 @@ class HelpWindow:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title(t("help.title"))
-        self.root.geometry("620x560")
+        self.root.geometry("760x620")
+        apply_theme(self.root)
         self._build()
 
     def _build(self) -> None:
@@ -385,8 +396,8 @@ class HelpWindow:
             row.pack(fill="x", pady=3, padx=2)
             ttk.Label(row, text=t(label_key), width=30, anchor="w",
                       font=("", 9, "bold")).pack(side="left")
-            ttk.Label(row, text=t(desc_key), wraplength=380, justify="left",
-                      foreground="#444").pack(side="left", fill="x", expand=True)
+            ttk.Label(row, text=t(desc_key), wraplength=420,
+                      justify="left").pack(side="left", fill="x", expand=True)
 
         btns = ttk.Frame(self.root, padding=(12, 0, 12, 12))
         btns.pack(fill="x")
@@ -394,6 +405,122 @@ class HelpWindow:
 
     def run(self) -> None:
         self.root.mainloop()
+
+
+class PasswordForm(ttk.Frame):
+    """Windows-password fields + verify/save/clear. Embeddable.
+
+    Replaces the console ``tools.set_password`` flow, which cannot run from
+    an installed build: a frozen exe ignores ``-m tools.set_password``, and a
+    windowed exe has no console for ``getpass``.
+
+    The password is checked with ``LogonUser`` before it is written. Storing
+    a wrong one is worse than storing none: the tile would feed bad
+    credentials to LogonUI on every unlock and could trip account lockout.
+    """
+
+    def __init__(self, master, on_saved: Callable[[], None] | None = None,
+                 show_clear: bool = True):
+        super().__init__(master, padding=12)
+        self.on_saved = on_saved
+        self.vars = {
+            "user": tk.StringVar(value=os.environ.get("USERNAME", "")),
+            "domain": tk.StringVar(value=os.environ.get("USERDOMAIN", ".")),
+            "password": tk.StringVar(),
+            "confirm": tk.StringVar(),
+        }
+        self.status = tk.StringVar()
+        self._build(show_clear)
+        self.refresh()
+
+    def _build(self, show_clear: bool) -> None:
+        ttk.Label(self, text=t("pwd.intro"), wraplength=430,
+                  justify="left").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        rows = [
+            ("user", "pwd.user", False),
+            ("domain", "pwd.domain", False),
+            ("password", "pwd.password", True),
+            ("confirm", "pwd.confirm", True),
+        ]
+        for i, (name, key, secret) in enumerate(rows, start=1):
+            ttk.Label(self, text=t(key) + ":", anchor="e", width=22).grid(
+                row=i, column=0, sticky="e", padx=4, pady=4)
+            entry = ttk.Entry(self, textvariable=self.vars[name], width=28,
+                              show="•" if secret else "")
+            entry.grid(row=i, column=1, sticky="w", padx=4, pady=4)
+            if name == "password":
+                entry.focus_set()
+            entry.bind("<Return>", lambda _e: self.save())
+
+        ttk.Label(self, textvariable=self.status, wraplength=430,
+                  justify="left").grid(row=5, column=0, columnspan=2,
+                                       sticky="w", pady=(8, 0))
+
+        btns = ttk.Frame(self)
+        btns.grid(row=6, column=0, columnspan=2, sticky="we", pady=(10, 0))
+        ttk.Button(btns, text=t("pwd.btn.save"),
+                   command=self.save).pack(side="right", padx=4)
+        if show_clear:
+            ttk.Button(btns, text=t("pwd.btn.clear"),
+                       command=self.clear).pack(side="left", padx=4)
+
+    def is_stored(self) -> bool:
+        return CREDS_PATH.exists()
+
+    def refresh(self) -> None:
+        self.status.set(t("pwd.stored") if self.is_stored() else t("pwd.absent"))
+
+    def save(self) -> bool:
+        user = self.vars["user"].get().strip()
+        domain = self.vars["domain"].get().strip() or "."
+        pw = self.vars["password"].get()
+        if not pw:
+            self.status.set(t("pwd.empty"))
+            return False
+        if pw != self.vars["confirm"].get():
+            self.status.set(t("pwd.mismatch"))
+            return False
+        try:
+            handle = win32security.LogonUser(
+                user, domain, pw,
+                win32con.LOGON32_LOGON_INTERACTIVE,
+                win32con.LOGON32_PROVIDER_DEFAULT,
+            )
+            handle.Close()
+        except Exception as e:
+            log.info("credential check rejected: %s", e)
+            self.status.set(f"{t('pwd.rejected')} ({e})")
+            return False
+        save_password(user, pw, domain)
+        self.vars["password"].set("")
+        self.vars["confirm"].set("")
+        self.status.set(t("pwd.saved"))
+        if self.on_saved:
+            self.on_saved()
+        return True
+
+    def clear(self) -> None:
+        clear_password()
+        self.status.set(t("pwd.cleared"))
+
+
+class PasswordWindow:
+    """Standalone window wrapper around :class:`PasswordForm`."""
+
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title(t("pwd.title"))
+        apply_theme(self.root)
+        self.form = PasswordForm(self.root)
+        self.form.pack(fill="both", expand=True)
+        ttk.Button(self.root, text=t("pwd.btn.close"),
+                   command=self.root.destroy).pack(side="right", padx=12, pady=(0, 12))
+
+    def run(self) -> None:
+        self.root.mainloop()
+
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +531,7 @@ _window_locks: dict[str, threading.Lock] = {
     "status": threading.Lock(),
     "settings": threading.Lock(),
     "help": threading.Lock(),
+    "password": threading.Lock(),
 }
 
 
@@ -438,3 +566,7 @@ def open_settings(
 
 def open_help() -> None:
     _launch_singleton("help", lambda: HelpWindow())
+
+
+def open_set_password() -> None:
+    _launch_singleton("password", lambda: PasswordWindow())

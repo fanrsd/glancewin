@@ -35,9 +35,15 @@ from face_service.i18n import t
 
 log = logging.getLogger(__name__)
 
-GITHUB_OWNER = "caochitam"
-GITHUB_REPO = "windows-face-unlock"
-RELEASES_LATEST_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+# This fork publishes no releases, and upstream's installer carries the old
+# DeepFace/torch stack plus a different Credential Provider CLSID — pulling
+# it would clobber this build. Point the updater at your own repo with
+# FACE_UNLOCK_UPDATE_REPO="owner/repo" to switch it back on.
+_UPDATE_REPO = os.environ.get("FACE_UNLOCK_UPDATE_REPO", "").strip()
+RELEASES_LATEST_URL = (
+    f"https://api.github.com/repos/{_UPDATE_REPO}/releases/latest"
+    if "/" in _UPDATE_REPO else ""
+)
 USER_AGENT = f"windows-face-unlock/{__version__} (updater)"
 INSTALLER_SUFFIX = ".exe"
 
@@ -76,6 +82,9 @@ def _http_get(url: str, timeout: float = 15.0) -> bytes:
 
 def check_latest(timeout: float = 10.0) -> ReleaseInfo | None:
     """Fetch the latest release. Returns None on any error (callers warn)."""
+    if not RELEASES_LATEST_URL:
+        log.info("update check disabled (set FACE_UNLOCK_UPDATE_REPO=owner/repo)")
+        return None
     try:
         payload = json.loads(_http_get(RELEASES_LATEST_URL, timeout=timeout))
     except urllib.error.HTTPError as e:

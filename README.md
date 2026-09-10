@@ -7,15 +7,15 @@ the source of.**
 
 Keywords: *windows face unlock, windows face login, face recognition
 windows, webcam login windows, howdy windows, windows hello alternative,
-credential provider face, deepface windows, arcface windows, auto lock
-when away, presence monitor, walk-away lock, face id for pc.*
+credential provider face, sface windows, onnx face recognition windows,
+auto lock when away, presence monitor, walk-away lock, face id for pc.*
 
 | | |
 |---|---|
 | Platform | Windows 10 / 11 x64 |
 | Python   | 3.11 or 3.12 |
 | License  | MIT |
-| Models   | ArcFace + MiniFASNet (DeepFace) + YuNet (OpenCV Zoo) |
+| Models   | SFace + MiniFASNetV2 + YuNet — all ONNX, run through OpenCV |
 
 ## Features at a glance
 
@@ -26,8 +26,8 @@ when away, presence monitor, walk-away lock, face id for pc.*
 - **Two presence modes**: strict (must match the enrolled face, blocks
   strangers) or lightweight (any face is enough, replaces old AutoFaceLock
   scripts).
-- **Anti-spoofing** (liveness, MiniFASNet) blocks flat photos and videos
-  of your face.
+- **Anti-spoofing** (liveness, MiniFASNetV2) blocks printed photos and
+  photos or videos played on a screen.
 - **Remote-session aware**: skips auto-lock when the session is RDP, or
   when TeamViewer / AnyDesk / RustDesk / Parsec / Chrome Remote Desktop /
   Quick Assist / UltraViewer hold an active remote connection.
@@ -39,25 +39,30 @@ when away, presence monitor, walk-away lock, face id for pc.*
   from the tray, applies live.
 - **DPAPI-encrypted** Windows password storage (user scope).
 
-## Install (end user)
+## Install (end user, nothing pre-installed)
 
-Grab the latest installer from the
-[**Releases page**](https://github.com/caochitam/windows-face-unlock/releases)
-and double-click it. Requires Windows 10/11 x64, admin rights, any webcam.
+Copy this folder to the machine and **double-click `install.cmd`**. It finds
+Python 3.10–3.13, installs Python 3.12 via `winget` if there is none, creates
+the venv, downloads the hash-pinned ONNX models, and opens the setup wizard.
+Windows 10/11 x64, any webcam, an internet connection.
 
-- ~350–500 MB installer — it bundles Python, TensorFlow CPU, PyTorch CPU,
-  DeepFace, OpenCV, YuNet + MiniFASNet models. No other downloads.
-- Not yet code-signed, so SmartScreen will say **"Unknown publisher"**.
-  Click **More info → Run anyway**. Signing application to SignPath is in
-  progress — when approved the signed installer will replace unsigned.
-- On first launch, open the tray icon → **Enroll face** and capture ~15
-  photos, then **Set Windows password** to enable lock-screen unlock.
-- Updates are checked automatically against GitHub Releases; a prompt
-  appears when a new version is available. You can also trigger a check
-  from the tray menu (*Check for updates…*).
+```powershell
+.\install.cmd                 # bootstrap + wizard
+.\bootstrap.ps1 -CheckOnly    # preflight only, changes nothing
+```
 
-Building the installer from source: see
-[`installer/README.md`](installer/README.md).
+The wizard walks six steps: models → enrollment → Windows password → service
+task → lock-screen tile (optional, needs admin) → live test.
+
+- **No prebuilt .exe installer is published for this fork.** The pipeline
+  exists (`installer/build.py`, `.github/workflows/release.yml` on a `v*`
+  tag) but unsigned PyInstaller binaries get quarantined by antivirus — see
+  [`INSTALL.md`](INSTALL.md) for the evidence and the SignPath route.
+- Automatic update checks are **off** unless you set
+  `FACE_UNLOCK_UPDATE_REPO=owner/repo` to your own fork.
+- The lock-screen tile needs `FaceCredentialProvider.dll`. Either build it
+  (Visual Studio + CMake, see [`credential_provider/README.md`](credential_provider/README.md))
+  or drop a DLL built elsewhere into `credential_provider\`.
 
 ## Architecture
 
@@ -66,7 +71,7 @@ An open-source, auditable replacement for closed-source webcam-login utilities
 
 | Component             | Language | Runs as                 | Role                                                                 |
 |-----------------------|----------|-------------------------|----------------------------------------------------------------------|
-| `face_service`        | Python   | User session (always)   | Camera + DeepFace + liveness + DPAPI; exposes a named pipe.          |
+| `face_service`        | Python   | User session (always)   | Camera + OpenCV SFace + liveness + DPAPI; exposes a named pipe.      |
 | `presence_monitor`    | Python   | User session (tray)     | Every 60 s, probe presence; if absent → `LockWorkStation()`.         |
 | `credential_provider` | C++      | LogonUI (SYSTEM)        | Windows Credential Provider tile that calls the service on unlock.   |
 
@@ -76,16 +81,18 @@ Plus two CLI tools: `tools.enroll` (capture reference photos) and
 ## Why three pieces?
 
 Windows lock-screen authentication runs in an isolated session as `SYSTEM`,
-which cannot comfortably load TensorFlow / open the webcam. The C++
-Credential Provider is therefore a thin shim that communicates with the
-heavyweight Python service over a local named pipe. This is the same pattern
-Howdy uses on Linux with PAM.
+which cannot comfortably load OpenCV with its ONNX models / open the
+webcam. The C++ Credential Provider is therefore a thin shim that
+communicates with the heavyweight Python service over a local named pipe.
+This is the same pattern Howdy uses on Linux with PAM.
 
 ## Features
 
-- **ArcFace (DeepFace) face recognition** with cosine-distance thresholding
-- **Anti-spoofing (liveness)** via DeepFace's built-in `anti_spoofing=True`
-  (MiniFASNet) — blocks flat photos of your face
+- **SFace face recognition** (OpenCV's `cv2.FaceRecognizerSF`, 128-d
+  embeddings) with cosine-distance thresholding — detect + embed + liveness
+  runs in ~16 ms/frame on CPU (AMD Ryzen 7 7445HS)
+- **Anti-spoofing (liveness)** via MiniFASNetV2 through `cv2.dnn` — blocks
+  printed photos and photos or videos played on a screen
 - **DPAPI-protected** Windows password storage (user scope)
 - **Multi-frame voting** for unlock: N out of M frames must match
 - **Presence auto-lock** every minute, with *remote-context exclusion*:
@@ -116,9 +123,12 @@ Howdy uses on Linux with PAM.
 .\setup.ps1
 ```
 
-This creates `.\.venv`, installs dependencies, writes a default config to
-`%USERPROFILE%\.face-unlock\config.toml`, and registers Task Scheduler jobs
-that run `face_service` and `presence_monitor` at logon.
+This creates `.\.venv`, installs dependencies, downloads the two
+hash-pinned ONNX models that aren't tracked in git (SFace recognizer,
+MiniFASNetV2 liveness) via `python installer/download_weights.py`, writes a
+default config to `%USERPROFILE%\.face-unlock\config.toml`, and registers
+Task Scheduler jobs that run `face_service` and `presence_monitor` at
+logon. YuNet already ships in the repo.
 
 ## Enroll your face + store password
 
@@ -149,6 +159,39 @@ just unlock with your password like usual.
 .\.venv\Scripts\python -m presence_monitor
 ```
 
+### Control panel without walk-away locking
+
+`tools\gui.cmd` (double-click) or:
+
+```powershell
+.\.venv\Scripts\pythonw -m presence_monitor --no-presence
+```
+
+`--no-presence` starts the tray with presence probing paused, so the webcam
+LED only lights while you unlock. Everything else is unchanged: Status,
+Settings, Enroll face, Set Windows password, log folder, language. Hit
+**Resume** in the tray menu to turn walk-away locking on for that session.
+
+### Setup wizard
+
+`tools\wizard.cmd`, or tray → **Setup wizard…**, or:
+
+```powershell
+.\.venv\Scripts\pythonw -m presence_monitor.wizard
+```
+
+Six numbered steps, each one probing its own state so the wizard doubles as
+a repair tool: **Models** (download + SHA-256 verify) → **Your face**
+(enrollment wizard, embedding count) → **Password** (verified with
+`LogonUser` before storing) → **Autostart** (register + start the logon task)
+→ **Lock screen** (register the Credential Provider DLL; raises the UAC
+prompt itself) → **Test** (one real verify through the same pipe the lock
+screen uses). The footer shows what is still missing.
+
+All windows use the Sun Valley ttk theme and follow the Windows
+light/dark setting (`AppsUseLightTheme`); override with
+`apply_theme(root, "light"|"dark")` in `presence_monitor/theme.py`.
+
 Trigger a manual unlock probe:
 
 ```powershell
@@ -165,7 +208,9 @@ $r.ReadToEnd()
 
 See [config.example.toml](config.example.toml). Key knobs:
 
-- `threshold` — cosine distance cutoff. Lower = stricter. Tune after enrolling.
+- `threshold` — SFace cosine *distance* cutoff (default 0.55). Lower =
+  stricter; the same person measures 0.09–0.30 on a UVC webcam. Tune after
+  enrolling.
 - `verify_frames` / `verify_required` — multi-frame voting.
 - `presence_interval_s` — how often to probe (default 60).
 - `presence_absent_strikes` — lock after N consecutive absent ticks (default 2,
@@ -179,10 +224,12 @@ Read these before trusting the CP for daily unlock:
    protects it from other users and from offline disk inspection, but **not**
    from malware running as you. If your attacker model includes that, use a
    smart card or Windows Hello proper.
-2. The pipe currently uses a NULL DACL (any local user can connect). This is
-   acceptable for a personal machine but consider tightening to `SELF` +
-   `SYSTEM` in `_build_sa_everyone()` if multiple accounts share the PC.
-3. Anti-spoofing blocks 2-D photos but **not 3-D masks or deepfake screens**.
+2. The pipe's DACL allows only the owning user and `SYSTEM` (`SYSTEM` is
+   required — the Credential Provider runs inside LogonUI). Verify with
+   `python -m tools.check_pipe_acl`.
+3. Anti-spoofing blocks printed photos and photos or videos played on a
+   screen, but **not 3-D masks**. Harsh backlight can also make it reject a
+   real face.
 4. The credential provider skeleton uses a hard-coded GUID from this repo —
    **generate your own** before sharing builds.
 
@@ -191,7 +238,10 @@ Read these before trusting the CP for daily unlock:
 This project draws on ideas from:
 
 - [boltgolt/howdy](https://github.com/boltgolt/howdy) — Linux/PAM face login
-- [serengil/deepface](https://github.com/serengil/deepface) — recognition + liveness
+- [OpenCV Zoo](https://github.com/opencv/opencv_zoo) — YuNet detector +
+  SFace recognizer (ONNX)
+- [minivision-ai/Silent-Face-Anti-Spoofing](https://github.com/minivision-ai/Silent-Face-Anti-Spoofing)
+  — MiniFASNetV2 liveness weights
 - [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) — dlib wrapper
 - Microsoft's [SampleCredentialProvider](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/CredentialProvider)
   — reference implementation for `ICredentialProvider`

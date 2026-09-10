@@ -36,6 +36,7 @@ from dataclasses import asdict
 from typing import Callable
 
 import pywintypes  # type: ignore
+import ntsecuritycon  # type: ignore
 import win32api  # type: ignore
 import win32file  # type: ignore
 import win32pipe  # type: ignore
@@ -54,10 +55,33 @@ from .recognizer import Recognizer
 log = logging.getLogger(__name__)
 
 
-def _build_sa_everyone() -> win32security.SECURITY_ATTRIBUTES:
-    """Allow LogonUI (SYSTEM) and any logged-in user to connect to the pipe."""
+def _build_pipe_sa() -> win32security.SECURITY_ATTRIBUTES:
+    """Pipe ACL: only this user and SYSTEM.
+
+    The pipe hands out the plaintext Windows password on a face match, so a
+    NULL DACL (which is what this used to be) let *any* local account ask for
+    it. SYSTEM is mandatory: the Credential Provider DLL runs inside
+    LogonUI.exe as SYSTEM and is the actual consumer.
+    """
+    token = win32security.OpenProcessToken(
+        win32api.GetCurrentProcess(), win32security.TOKEN_QUERY
+    )
+    try:
+        user_sid = win32security.GetTokenInformation(
+            token, win32security.TokenUser
+        )[0]
+    finally:
+        win32api.CloseHandle(token)
+    system_sid = win32security.ConvertStringSidToSid("S-1-5-18")
+
+    dacl = win32security.ACL()
+    for sid in (user_sid, system_sid):
+        dacl.AddAccessAllowedAce(
+            win32security.ACL_REVISION, ntsecuritycon.FILE_ALL_ACCESS, sid
+        )
+
     sd = win32security.SECURITY_DESCRIPTOR()
-    sd.SetSecurityDescriptorDacl(1, None, 0)  # NULL DACL = allow all (OK for named pipe on localhost)
+    sd.SetSecurityDescriptorDacl(1, dacl, 0)
     sa = win32security.SECURITY_ATTRIBUTES()
     sa.SECURITY_DESCRIPTOR = sd
     sa.bInheritHandle = 0
@@ -293,7 +317,7 @@ class FaceService:
         return {"ok": False, "reason": "unknown-command"}
 
     def _serve_one(self) -> None:
-        sa = _build_sa_everyone()
+        sa = _build_pipe_sa()
         handle = win32pipe.CreateNamedPipe(
             PIPE_NAME,
             win32pipe.PIPE_ACCESS_DUPLEX,

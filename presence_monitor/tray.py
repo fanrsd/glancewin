@@ -1,11 +1,8 @@
 from __future__ import annotations
 import logging
 import os
-import subprocess
-import sys
 import threading
 import time
-from pathlib import Path
 
 from PIL import Image, ImageDraw
 import pystray
@@ -14,13 +11,15 @@ from face_service.config import Config, LOG_PATH
 from face_service.i18n import LANGUAGES, get_language, set_language, t
 
 from .enroll_gui import open_enroll
-from .gui import open_help, open_settings, open_status
+from .gui import open_help, open_set_password, open_settings, open_status
 from .monitor import PresenceMonitor, pipe_call
 from .updater import check_latest, current_version, download_and_launch
+from .wizard import open_wizard
 
 log = logging.getLogger(__name__)
 
-SET_PASSWORD_CMD = ["-m", "tools.set_password"]
+# tools.set_password is CLI-only; the tray uses the GUI dialog instead so it
+# also works from an installed (frozen) build.
 
 # Visual icons that sit after the label text in each tray menu entry.
 # Placed at the end with a tab so they right-align nicely in the Windows
@@ -30,6 +29,7 @@ EMOJI = {
     "status":       "📊",
     "settings":     "⚙",
     "probe":        "📸",
+    "wizard":       "🧭",
     "pause":        "⏸",
     "resume":       "▶",
     "enroll":       "🧑",
@@ -63,20 +63,6 @@ def _icon_image(active: bool, paused: bool = False) -> Image.Image:
     return img
 
 
-def _launch_tool(args: list[str]) -> None:
-    """Spawn a tool in a new console window using the same Python that runs us."""
-    repo_root = Path(__file__).resolve().parent.parent
-    venv_py = repo_root / ".venv" / "Scripts" / "python.exe"
-    py = str(venv_py) if venv_py.exists() else sys.executable
-    try:
-        subprocess.Popen(
-            [py, *args],
-            cwd=str(repo_root),
-            creationflags=subprocess.CREATE_NEW_CONSOLE,  # type: ignore[attr-defined]
-        )
-    except Exception:
-        log.exception("failed to launch tool: %s", args)
-
 
 def _save_language(code: str) -> None:
     """Persist the language choice so it survives service restart."""
@@ -89,11 +75,16 @@ def _save_language(code: str) -> None:
         log.exception("failed to persist language=%s", code)
 
 
-def run_with_tray(cfg: Config) -> None:
+def run_with_tray(cfg: Config, start_paused: bool = False) -> None:
     # Honor saved language from config.
     set_language(cfg.language)
 
     monitor = PresenceMonitor(cfg)
+    if start_paused:
+        # Tray as a pure control panel: no camera probes, so the webcam LED
+        # stays off until you unlock. Resume from the tray to get walk-away
+        # locking back for this session.
+        monitor.pause()
     thread = threading.Thread(target=monitor.run, name="presence-loop", daemon=True)
     thread.start()
 
@@ -132,8 +123,11 @@ def run_with_tray(cfg: Config) -> None:
     def on_enroll(icon, item):
         open_enroll()
 
+    def on_wizard(icon, item):
+        open_wizard()
+
     def on_set_password(icon, item):
-        _launch_tool(SET_PASSWORD_CMD)
+        open_set_password()
 
     def on_open_log(icon, item):
         try:
@@ -213,7 +207,7 @@ def run_with_tray(cfg: Config) -> None:
 
     # Non-blocking auto-check on startup (silent if up to date).
     def _startup_update_check():
-        time.sleep(30)  # let TF warm up first, don't hit GH immediately
+        time.sleep(30)  # let the service warm up first, don't hit GH immediately
         _run_update_flow(interactive=False)
     threading.Thread(target=_startup_update_check,
                      name="update-startup", daemon=True).start()
@@ -300,6 +294,7 @@ def run_with_tray(cfg: Config) -> None:
         pystray.MenuItem(pause_text, on_toggle),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lbl("tray.enroll", "enroll"), on_enroll),
+        pystray.MenuItem(lbl("tray.wizard", "wizard"), on_wizard),
         pystray.MenuItem(lbl("tray.set_password", "set_password"), on_set_password),
         pystray.MenuItem(lbl("tray.open_log", "open_log"), on_open_log),
         pystray.Menu.SEPARATOR,

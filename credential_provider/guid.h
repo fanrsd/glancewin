@@ -1,7 +1,8 @@
 #pragma once
 #include <initguid.h>
 
-// {F8A0B4D9-3C7F-4B0A-9E21-8C1B1E2B7C10}
-// Replace with a fresh GUID before publishing. Generate with: uuidgen.exe
+// {F50C7625-CF2E-4572-A0CB-BCF578F9BECA}
+// Private to this build. Generate your own with uuidgen.exe before
+// distributing — two providers sharing a CLSID collide in LogonUI.
 DEFINE_GUID(CLSID_FaceCredentialProvider,
-    0xf8a0b4d9, 0x3c7f, 0x4b0a, 0x9e, 0x21, 0x8c, 0x1b, 0x1e, 0x2b, 0x7c, 0x10);
+    0xf50c7625, 0xcf2e, 0x4572, 0xa0, 0xcb, 0xbc, 0xf5, 0x78, 0xf9, 0xbe, 0xca);

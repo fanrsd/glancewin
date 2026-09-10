@@ -1,10 +1,8 @@
 import os
-# Prevent TF/Keras from spawning extra worker processes that can steal
-# the named pipe and exhaust resources.
+# OpenCV's DNN backend spawns one thread per core by default; those threads
+# compete with the pipe server for CPU during a verify. One is enough at
+# 80x80 (liveness) and 112x112 (SFace) input sizes.
 os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
-os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")  # force CPU; no CUDA forking
 
 import multiprocessing
 

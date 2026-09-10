@@ -18,8 +18,13 @@ if (-not (Test-Path "$root\.venv")) {
 }
 $py = "$root\.venv\Scripts\python.exe"
 
-& $py -m pip install --upgrade pip
-& $py -m pip install -r "$root\requirements.txt"
+# --use-feature=truststore: use the Windows certificate store instead of pip's
+# bundled certifi, which is stale in some pip builds and fails TLS against PyPI.
+& $py -m pip install --use-feature=truststore --upgrade pip
+& $py -m pip install --use-feature=truststore -r "$root\requirements.txt"
+
+# Models are not tracked in git (SFace 37 MB, MiniFASNetV2 1.7 MB); hash-pinned.
+& $py "$root\installer\download_weights.py"
 
 # 2. config
 $home_cfg = Join-Path $env:USERPROFILE ".face-unlock"

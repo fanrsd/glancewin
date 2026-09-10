@@ -11,7 +11,7 @@ Flow
 4. When capture is armed and a face has been visible long enough, save
    the frame as JPG into ``ENROLL_DIR`` and increment the counter.
 5. When the user hits "Build", call ``build_enrollment`` on the service
-   which runs DeepFace and writes ``embeddings.npz``.
+   which runs SFace and writes ``embeddings.npz``.
 6. On close, always ``resume_camera`` so probes come back on.
 """
 from __future__ import annotations
@@ -31,6 +31,7 @@ from face_service.detector import FaceDetector
 from face_service.i18n import t
 
 from .monitor import pipe_call
+from .theme import apply_theme
 from .widgets import InfoButton, Tooltip, attach_tooltip
 
 log = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class EnrollWindow:
         self.root = tk.Tk()
         self.root.title(t("enroll.title"))
         self.root.geometry(f"{PREVIEW_W + 60}x{PREVIEW_H + 320}")
+        apply_theme(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.detector = FaceDetector()
@@ -130,8 +132,8 @@ class EnrollWindow:
 
         # Existing data label
         self.existing_var = tk.StringVar()
-        ttk.Label(frm, textvariable=self.existing_var,
-                  foreground="#555").pack(anchor="w", pady=(2, 6))
+        ttk.Label(frm, textvariable=self.existing_var).pack(
+            anchor="w", pady=(2, 6))
 
         # Buttons row
         btns = ttk.Frame(frm)
@@ -396,7 +398,7 @@ class EnrollWindow:
         self._set_guide("enroll.guide.building")
 
         def worker():
-            # Call the service — it already has DeepFace loaded and warm.
+            # Call the service — its SFace recogniser is already loaded and warm.
             resp = pipe_call({"cmd": "build_enrollment"}, timeout_s=120.0)
             def done():
                 self._building = False

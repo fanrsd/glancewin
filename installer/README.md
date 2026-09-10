@@ -1,17 +1,18 @@
 # Installer build
 
 This folder builds the end-user installer that drops Windows Face Unlock
-onto a machine that has nothing installed — no Python, no TensorFlow, no
-torch, no Visual C++ runtime redist beyond what Windows ships. One `.exe`,
+onto a machine that has nothing installed — no Python, no OpenCV, no
+Visual C++ runtime redist beyond what Windows ships. One `.exe`,
 users double-click, done.
 
 Two ways to build: locally (for testing) and in CI (for releases).
 
 ## What you get
 
-`installer_output\WindowsFaceUnlock-Setup-<version>.exe` (~350–500 MB
-because it bundles Python 3.12, TensorFlow CPU, PyTorch CPU, DeepFace,
-OpenCV, pywin32, all models, and the Credential Provider DLL).
+`installer_output\WindowsFaceUnlock-Setup-<version>.exe`. No Python ML
+frameworks are bundled any more; the size is dominated by Python 3.12 +
+OpenCV plus the three ONNX models (~40 MB of models total), with pywin32
+and the Credential Provider DLL alongside them.
 
 Plus `.sha256` next to it.
 
@@ -40,7 +41,6 @@ Steps from the repo root:
 # Install dependencies and PyInstaller
 .\setup.ps1
 .\.venv\Scripts\pip install pyinstaller
-.\.venv\Scripts\pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 
 # Run the whole pipeline
 .\.venv\Scripts\python installer\build.py
@@ -48,8 +48,8 @@ Steps from the repo root:
 
 `build.py` runs, in order:
 
-1. `installer/download_weights.py` — fetch ArcFace + MiniFASNet weights
-   into `models/weights/` (skipped if already present).
+1. `installer/download_weights.py` — fetch the SFace recognizer and the
+   MiniFASNetV2 liveness model into `models/` (skipped if already present).
 2. CMake → `credential_provider\build\Release\FaceCredentialProvider.dll`
    (skipped if `SKIP_CP=1`).
 3. PyInstaller against `installer/windows_face_unlock.spec` → two exes
@@ -60,8 +60,8 @@ Steps from the repo root:
    `installer_output\`.
 6. SHA-256 checksum next to the installer.
 
-Expect ~15 minutes on a warm venv, mostly PyInstaller analysing
-TensorFlow.
+Expect ~15 minutes on a warm venv, mostly PyInstaller and Inno Setup
+compression.
 
 ### Environment knobs
 
@@ -114,13 +114,13 @@ Alternatives if SignPath isn't an option:
 
 ## Anatomy
 
-- `windows_face_unlock.spec` — PyInstaller: two Analyses merged via
-  `MERGE()` so TF/torch land once. Hidden imports + collected data files
-  for TF, tf_keras, deepface, torch, torchvision, cv2. Excludes
+- `windows_face_unlock.spec` — PyInstaller: collects `cv2` and bundles the
+  three ONNX models (YuNet, SFace, MiniFASNetV2) as data files. Excludes
   `matplotlib`, `PyQt*`, Jupyter to trim fat.
-- `download_weights.py` — grabs the three weights DeepFace needs (ArcFace,
-  MiniFASNet v2, MiniFASNet v1SE) into `models/weights/` so the installer
-  can bundle them.
+- `download_weights.py` — downloads the two models that aren't tracked in
+  git (SFace recognizer, MiniFASNetV2 liveness) into `models/` and verifies
+  each against a pinned SHA-256, so the installer can bundle them. YuNet
+  already ships in the repo.
 - `installer.iss` — Inno Setup script. Admin install, `lzma2/ultra64`,
   `CloseApplications=yes` so the updater can replace files in-place, two
   tasks (CP register + tray autostart), uninstall asks about user data.

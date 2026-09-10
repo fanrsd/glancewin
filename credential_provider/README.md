@@ -31,9 +31,9 @@ Output: `build\Release\FaceCredentialProvider.dll`.
 To remove: `.\register.ps1 -Action unregister`.
 
 Registration writes:
-- `HKCR\CLSID\{F8A0B4D9-...}` — COM class
-- `HKCR\CLSID\{F8A0B4D9-...}\InprocServer32` — DLL path, Apartment threading
-- `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\{F8A0B4D9-...}`
+- `HKCR\CLSID\{F50C7625-CF2E-4572-A0CB-BCF578F9BECA}` — COM class
+- `HKCR\CLSID\{F50C7625-CF2E-4572-A0CB-BCF578F9BECA}\InprocServer32` — DLL path, Apartment threading
+- `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\{F50C7625-CF2E-4572-A0CB-BCF578F9BECA}`
   — enables the CP in LogonUI
 
 After (un)registering, lock the workstation (Win+L) and the new "Face Unlock"
@@ -46,8 +46,8 @@ tile should appear.
    `GetSerialization`.
 3. `GetSerialization` opens `\\.\pipe\FaceUnlock`, sends
    `{"cmd":"unlock"}`, and waits up to 45 s.
-4. `FaceService` performs the camera capture + DeepFace verify + liveness
-   check, decrypts the DPAPI password blob, and returns
+4. `FaceService` performs the camera capture + OpenCV SFace verify +
+   liveness check, decrypts the DPAPI password blob, and returns
    `{"ok":true,"username":"...","password":"...","domain":"..."}`.
 5. The CP packs those into a `KERB_INTERACTIVE_UNLOCK_LOGON` and returns
    `CPGSR_RETURN_CREDENTIAL_FINISHED`. LogonUI performs the actual logon.
@@ -58,15 +58,18 @@ tile should appear.
   the DPAPI blob is encrypted with the *user* key, the Python service (which
   runs in the user session) is the one that decrypts it and passes plaintext
   over the pipe — the CP itself never touches DPAPI. The pipe is local-only
-  and uses a NULL DACL, which is fine but you should understand the threat
-  model before deploying widely.
+  and its DACL allows only the owning user plus `SYSTEM`, so another local
+  account cannot ask for the password (`python -m tools.check_pipe_acl`).
 - This is a **skeleton**: no custom tile bitmap, no localisation, no progress
   UI while the service captures frames, and only the single "unlock /
   interactive logon" scenario is implemented. The Microsoft
   [SampleCredentialProvider](https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/CredentialProvider)
   is a good reference for polishing.
-- The `CLSID_FaceCredentialProvider` GUID in `guid.h` is shared with the
-  world. **Generate your own** (`uuidgen.exe`) before publishing or
-  distributing builds.
+- The `CLSID_FaceCredentialProvider` GUID in `guid.h`
+  (`{F50C7625-CF2E-4572-A0CB-BCF578F9BECA}`) is private to this fork —
+  `dll.cpp` derives the registry string from that constant via
+  `StringFromGUID2`, so there is no duplicated literal to keep in sync. If
+  you distribute your own builds, still generate a fresh GUID
+  (`uuidgen.exe`) so your CP never collides with this one.
 - If `GetSerialization` returns `S_FALSE` the user can fall back to the
   standard password tile.

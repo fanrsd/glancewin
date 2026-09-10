@@ -34,10 +34,10 @@ def _default_language() -> str:
 
 @dataclass
 class Config:
-    model_name: str = "ArcFace"
-    detector_backend: str = "yunet"  # yunet is fast + robust. Alternatives: opencv, retinaface
-    distance_metric: str = "cosine"
-    threshold: float = 0.45          # ArcFace cosine
+    # Cosine *distance* cutoff for SFace embeddings; lower = stricter.
+    # Measured on a UVC webcam: same person ~0.25-0.30, so 0.55 leaves margin
+    # while staying well under OpenCV's published 0.637 operating point.
+    threshold: float = 0.55
     anti_spoofing: bool = True
     camera_index: int = 0
     camera_warmup_frames: int = 10   # discard N frames after opening for auto-exposure
@@ -46,7 +46,7 @@ class Config:
     verify_required: int = 2          # trong đó cần ≥ N khớp (giảm từ 3 để nhanh hơn)
     presence_interval_s: int = 60
     presence_absent_strikes: int = 2  # vắng mặt liên tiếp trước khi lock
-    # "recognition" = DeepFace ArcFace must match enrolled face (stronger; walk-away + strangers)
+    # "recognition" = SFace embedding must match enrolled face (stronger; walk-away + strangers)
     # "detection"   = YuNet any-face-in-frame is enough (weaker; mimics old AutoFaceLock)
     presence_mode: str = "recognition"
     warmup_on_start: bool = True

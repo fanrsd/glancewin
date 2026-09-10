@@ -2,11 +2,11 @@
 # single shared dist folder. Run from the repo root:
 #     pyinstaller installer/windows_face_unlock.spec --noconfirm --clean
 #
-# The two entry points share runtime binaries via MERGE so TensorFlow and
-# torch are only laid down once (~250 MB saved).
+# The two entry points share runtime binaries via MERGE so OpenCV is only
+# laid down once.
 
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.building.api import PYZ, EXE, COLLECT, MERGE
 from PyInstaller.building.build_main import Analysis
 
@@ -14,55 +14,50 @@ REPO_ROOT = Path(SPECPATH).resolve().parent
 BLOCK_CIPHER = None
 
 # ---------------------------------------------------------------------------
-# Hidden imports + data collection — TF / DeepFace / torch are hostile to
-# static analysis, so we help PyInstaller find everything.
+# Hidden imports + data collection. Recognition and liveness both run through
+# cv2.dnn, so there is no TensorFlow / torch / DeepFace tree to chase.
 # ---------------------------------------------------------------------------
 HIDDEN = []
-HIDDEN += collect_submodules("tensorflow")
-HIDDEN += collect_submodules("tf_keras")
-HIDDEN += collect_submodules("keras")
-HIDDEN += collect_submodules("deepface")
-HIDDEN += collect_submodules("torch")
-HIDDEN += collect_submodules("torchvision")
 HIDDEN += [
     "pystray._win32",
     "PIL._tkinter_finder",
     "win32api", "win32security", "win32file", "win32pipe",
-    "win32event", "win32process", "winerror",
+    "win32event", "win32process", "win32con", "win32crypt", "winerror",
     "pywintypes",
     "presence_monitor.enroll_gui",
     "presence_monitor.gui",
+    "presence_monitor.remote_session",
     "presence_monitor.updater",
+    "presence_monitor.theme",
+    "presence_monitor.wizard",
     "presence_monitor.widgets",
     "face_service.i18n",
     "face_service.detector",
+    "face_service.liveness",
+    "face_service.credentials",
     "face_service._version",
 ]
 
 DATAS = []
-DATAS += collect_data_files("tensorflow")
-DATAS += collect_data_files("tf_keras")
-DATAS += collect_data_files("keras")
-DATAS += collect_data_files("deepface")
-DATAS += collect_data_files("torch")
 DATAS += collect_data_files("cv2")
+# sv_ttk ships .tcl theme files; without them every window falls back to the
+# default ttk look in a frozen build.
+DATAS += collect_data_files("sv_ttk")
 
-# Bundle YuNet model + DeepFace weights.
+# Bundle the three ONNX models: detect, recognise, liveness.
 DATAS += [
-    (str(REPO_ROOT / "models" / "face_detection_yunet_2023mar.onnx"), "models"),
+    (str(REPO_ROOT / "models" / name), "models")
+    for name in (
+        "face_detection_yunet_2023mar.onnx",
+        "face_recognition_sface_2021dec.onnx",
+        "2.7_80x80_MiniFASNetV2.onnx",
+    )
 ]
-weights_dir = REPO_ROOT / "models" / "weights"
-if weights_dir.exists():
-    for p in weights_dir.iterdir():
-        if p.is_file():
-            DATAS.append((str(p), "models/weights"))
 
 EXCLUDES = [
-    # Reduce size: drop things DeepFace pulls in but we never exercise.
     "matplotlib", "PyQt5", "PyQt6", "PySide2", "PySide6",
     "jupyter", "ipykernel", "notebook",
-    "tensorflow.lite.experimental.microfrontend",
-    "scipy.spatial.cKDTree",  # huge, unused
+    "tensorflow", "keras", "tf_keras", "torch", "torchvision", "deepface",
 ]
 
 # ---------------------------------------------------------------------------

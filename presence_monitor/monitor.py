@@ -199,6 +199,8 @@ class PresenceMonitor:
 
 
 def main() -> None:
+    import sys
+
     from face_service.config import LOG_PATH
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -207,9 +209,11 @@ def main() -> None:
         handlers=[logging.FileHandler(LOG_PATH.with_name("presence.log"), encoding="utf-8"),
                   logging.StreamHandler()],
     )
+    # --no-presence: tray/GUI only, walk-away locking starts paused.
+    start_paused = "--no-presence" in sys.argv[1:]
     cfg = Config.load()
     from .tray import run_with_tray
-    run_with_tray(cfg)
+    run_with_tray(cfg, start_paused=start_paused)
 
 
 if __name__ == "__main__":
