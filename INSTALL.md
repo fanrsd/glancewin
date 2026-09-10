@@ -269,15 +269,29 @@ files to restore if needed.
   User Profile Service / Authentication — for LogonUI / LSA errors when
   debugging Credential Provider issues
 
-## 10. Uninstall completely
+## 10. Reinstall or uninstall
 
 ```powershell
-# Admin PowerShell
-.\credential_provider\register.ps1 -Action unregister
-Unregister-ScheduledTask -TaskName 'FaceUnlock-Service' -Confirm:$false
-Unregister-ScheduledTask -TaskName 'FaceUnlock-Presence' -Confirm:$false
-Remove-Item -Recurse -Force "$env:USERPROFILE\.face-unlock"
-Remove-Item -Recurse -Force .\.venv
+.\tools\uninstall.ps1 -DryRun      # print the plan, change nothing
+.\tools\uninstall.ps1              # stop tasks + processes, unregister the tile
+.\install.cmd                      # set up again
 ```
 
-The repo can then be deleted.
+`uninstall.ps1` keeps your data by default, so the wizard comes back with
+enrollment and password already satisfied — that is the normal "reinstall
+because something is broken" path. It elevates only the one step that needs
+it (unregistering the Credential Provider).
+
+Flags for a genuinely clean slate:
+
+| Flag | Extra effect |
+|---|---|
+| `-PurgeData` | deletes `config.toml`, `embeddings.npz`, `credentials.bin`, logs and `enroll\` — you re-enroll and re-enter your password |
+| `-RemoveVenv` | deletes `.venv`, so the next install re-downloads the dependencies |
+
+`%USERPROFILE%\.face-unlock\signing\` is never touched: it holds the
+code-signing key, which has nothing to do with an install.
+
+After that the repo folder can be deleted. For the installer build (Option A)
+use Windows *Apps & features*, or run the setup exe again over the top — Inno
+Setup reuses the previous directory and replaces the files.
