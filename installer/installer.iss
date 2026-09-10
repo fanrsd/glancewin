@@ -113,16 +113,25 @@ var
   DataDir: string;
   ResultCode: Integer;
 begin
-  if CurUninstallStep = usPostUninstall then
+  if CurUninstallStep <> usPostUninstall then
+    exit;
+  DataDir := ExpandConstant('{%USERPROFILE}\.face-unlock');
+  if not DirExists(DataDir) then
+    exit;
+  // Never touch this data without a human answering. /SUPPRESSMSGBOXES
+  // answers MsgBox with its default, which used to be IDYES here - a
+  // silent uninstall then deleted the user's enrollment, their stored
+  // password and anything else living in that folder.
+  if UninstallSilent then
   begin
-    DataDir := ExpandConstant('{%USERPROFILE}\.face-unlock');
-    if DirExists(DataDir) then
-    begin
-      if MsgBox('Also remove your saved enrollment data at ' + DataDir + '?', mbConfirmation, MB_YESNO) = IDYES then
-      begin
-        Exec(ExpandConstant('{cmd}'), '/C rmdir /S /Q "' + DataDir + '"',
-             '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-      end;
-    end;
+    Log('Silent uninstall: keeping ' + DataDir);
+    exit;
+  end;
+  if MsgBox('Also remove your saved enrollment data at ' + DataDir + '?' + #13#10 +
+            'This deletes your face embeddings and stored Windows password.',
+            mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+  begin
+    Exec(ExpandConstant('{cmd}'), '/C rmdir /S /Q "' + DataDir + '"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;

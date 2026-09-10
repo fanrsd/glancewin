@@ -45,20 +45,29 @@ auto lock when away, presence monitor, walk-away lock, face id for pc.*
 
 Download `WindowsFaceUnlock-Setup-<ver>.exe` from the
 [**Releases page**](https://github.com/fanrsd/glancewin/releases) and
-double-click it. 87 MB, bundles Python, OpenCV, the three ONNX models and
-the Credential Provider DLL. Verify it first if you like:
+double-click it: 87 MB, bundles Python, OpenCV, the three ONNX models and
+the Credential Provider DLL, then starts the tray so you can run the wizard.
 
 ```powershell
 (Get-FileHash .\WindowsFaceUnlock-Setup-0.2.2.exe -Algorithm SHA256).Hash
 # compare with the .sha256 asset next to it
 ```
 
-**Not code-signed yet**, so SmartScreen says *"unknown publisher"* — click
-**More info → Run anyway**. Some antivirus products also dislike unsigned
-PyInstaller executables: the installer itself passed McAfee here, but the
-two executables it unpacks were quarantined when built locally. If that
-happens, use Option B. Signing status and the SignPath route:
-[`INSTALL.md`](INSTALL.md).
+**Read this before choosing Option A.** Signed with a self-signed
+certificate (see *Code signing policy*), which no machine trusts until you
+import it — so SmartScreen still says *"unknown publisher"*: click
+**More info → Run anyway**.
+
+Worse, antivirus heuristics dislike unsigned PyInstaller executables.
+Measured on a Windows 11 machine running McAfee: the installer ran fine and
+laid down `face_service.exe` and `face_unlock_tray.exe`, and **within a
+minute McAfee had deleted both executables and removed the two scheduled
+tasks with them** — leaving an installed-but-dead app. Windows Defender
+alone did not object. If your machine behaves like that, either import the
+signing certificate first, add an exclusion for
+`C:\Program Files\WindowsFaceUnlock`, or use Option B, which ships no frozen
+executables at all (`python.exe` is signed by the Python Software
+Foundation, so it is never the thing that gets quarantined).
 
 ### Option B — from source (no frozen binaries, no AV drama)
 
