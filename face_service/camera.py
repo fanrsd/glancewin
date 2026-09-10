@@ -36,9 +36,7 @@ class Camera:
                     time.sleep(0.1)
                 if ok:
                     self._cap = cap
-                    for _ in range(self.warmup_frames):
-                        cap.read()
-                        time.sleep(0.03)
+                    self._warmup(cap)
                     return
                 last_err = (f"attempt={attempt} backend={backend} "
                             f"isOpened={cap.isOpened()}")
@@ -46,6 +44,22 @@ class Camera:
             if attempt < 2:
                 time.sleep(1.0)  # let the driver flush stuck handles
         raise RuntimeError(f"Cannot open camera index {self.index} ({last_err})")
+
+    # Auto-exposure needs a few frames, and this webcam hands out one or two
+    # all-black frames right after the device opens. Discarding a fixed
+    # count sometimes returned before the first lit frame, which made a
+    # verify see nothing but black and report "no face".
+    DARK_MEAN = 5.0
+
+    def _warmup(self, cap: cv2.VideoCapture) -> None:
+        for i in range(max(self.warmup_frames, 1) * 3):
+            ok, frame = cap.read()
+            time.sleep(0.03)
+            lit = ok and frame is not None and float(frame.mean()) > self.DARK_MEAN
+            # Still burn the configured number of frames after the first lit
+            # one: exposure and white balance are not settled yet.
+            if lit and i >= self.warmup_frames:
+                return
 
     def close(self) -> None:
         if self._cap is not None:
