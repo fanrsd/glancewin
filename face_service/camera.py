@@ -45,21 +45,34 @@ class Camera:
                 time.sleep(1.0)  # let the driver flush stuck handles
         raise RuntimeError(f"Cannot open camera index {self.index} ({last_err})")
 
-    # Auto-exposure needs a few frames, and this webcam hands out one or two
-    # all-black frames right after the device opens. Discarding a fixed
-    # count sometimes returned before the first lit frame, which made a
-    # verify see nothing but black and report "no face".
+    # This webcam opens black and then ramps its auto-exposure over a
+    # dozen frames. Burning a fixed count returned mid-ramp, where the
+    # frame is lit but too dark for YuNet, so a verify saw no face at all
+    # (distance 1.0). Wait for brightness to stop changing instead.
     DARK_MEAN = 5.0
+    SETTLE_RATIO = 0.08       # <8% change between frames counts as settled
+    SETTLE_FRAMES = 3         # ...for this many frames in a row
 
     def _warmup(self, cap: cv2.VideoCapture) -> None:
-        for i in range(max(self.warmup_frames, 1) * 3):
+        budget = max(self.warmup_frames, 1) * 6
+        prev = None
+        settled = 0
+        for i in range(budget):
             ok, frame = cap.read()
             time.sleep(0.03)
-            lit = ok and frame is not None and float(frame.mean()) > self.DARK_MEAN
-            # Still burn the configured number of frames after the first lit
-            # one: exposure and white balance are not settled yet.
-            if lit and i >= self.warmup_frames:
-                return
+            if not ok or frame is None:
+                continue
+            mean = float(frame.mean())
+            if mean <= self.DARK_MEAN:
+                prev, settled = None, 0
+                continue
+            if prev is not None and abs(mean - prev) / max(prev, 1.0) < self.SETTLE_RATIO:
+                settled += 1
+                if settled >= self.SETTLE_FRAMES and i >= self.warmup_frames:
+                    return
+            else:
+                settled = 0
+            prev = mean
 
     def close(self) -> None:
         if self._cap is not None:
