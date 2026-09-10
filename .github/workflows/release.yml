@@ -58,8 +58,15 @@ jobs:
           if ($tag -notmatch '^v\d+\.\d+\.\d+') { $tag = "v0.0.0-${{ github.run_number }}" }
           $ver = $tag.TrimStart('v')
           Write-Host "Stamping app + installer with version $ver"
-          (Get-Content face_service\_version.py) -replace '(__version__\s*=\s*")[^"]+(")', "`$1$ver`$2" | Set-Content face_service\_version.py
-          (Get-Content installer\installer.iss) -replace '(#define MyAppVersion ")[^"]+(")', "`$1$ver`$2" | Set-Content installer\installer.iss
+          # ${1} not $1: "$1$ver" would be parsed as group $10 when the
+          # version starts with a digit, which silently deleted the whole
+          # #define line and made ISCC fail with "Undeclared identifier".
+          (Get-Content face_service\_version.py) -replace '(__version__\s*=\s*")[^"]+(")', "`${1}$ver`${2}" | Set-Content face_service\_version.py
+          (Get-Content installer\installer.iss) -replace '(#define MyAppVersion ")[^"]+(")', "`${1}$ver`${2}" | Set-Content installer\installer.iss
+          # Fail here rather than three steps later with a confusing error.
+          $stamped = (Select-String -Path installer\installer.iss -Pattern "^#define MyAppVersion `"$ver`"$").Count
+          if ($stamped -ne 1) { throw "installer.iss lost its MyAppVersion define" }
+          if (-not (Select-String -Path face_service\_version.py -Pattern "$ver")) { throw "_version.py not stamped" }
 
       - name: Pre-download model weights
         shell: powershell
