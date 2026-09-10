@@ -39,30 +39,47 @@ auto lock when away, presence monitor, walk-away lock, face id for pc.*
   from the tray, applies live.
 - **DPAPI-encrypted** Windows password storage (user scope).
 
-## Install (end user, nothing pre-installed)
+## Install (end user)
+
+### Option A — installer (nothing pre-installed, not even Python)
+
+Download `WindowsFaceUnlock-Setup-<ver>.exe` from the
+[**Releases page**](https://github.com/fanrsd/glancewin/releases) and
+double-click it. 87 MB, bundles Python, OpenCV, the three ONNX models and
+the Credential Provider DLL. Verify it first if you like:
+
+```powershell
+(Get-FileHash .\WindowsFaceUnlock-Setup-0.2.1.exe -Algorithm SHA256).Hash
+# compare with the .sha256 asset next to it
+```
+
+**Not code-signed yet**, so SmartScreen says *"unknown publisher"* — click
+**More info → Run anyway**. Some antivirus products also dislike unsigned
+PyInstaller executables: the installer itself passed McAfee here, but the
+two executables it unpacks were quarantined when built locally. If that
+happens, use Option B. Signing status and the SignPath route:
+[`INSTALL.md`](INSTALL.md).
+
+### Option B — from source (no frozen binaries, no AV drama)
 
 Copy this folder to the machine and **double-click `install.cmd`**. It finds
 Python 3.10–3.13, installs Python 3.12 via `winget` if there is none, creates
 the venv, downloads the hash-pinned ONNX models, and opens the setup wizard.
-Windows 10/11 x64, any webcam, an internet connection.
+Measured at 13 s on a machine that already had Python.
 
 ```powershell
 .\install.cmd                 # bootstrap + wizard
 .\bootstrap.ps1 -CheckOnly    # preflight only, changes nothing
 ```
 
-The wizard walks six steps: models → enrollment → Windows password → service
-task → lock-screen tile (optional, needs admin) → live test.
+Either way the wizard walks six steps: models → enrollment → Windows
+password → service task → lock-screen tile (optional, needs admin) → live
+test. For Option B the tile needs `FaceCredentialProvider.dll`: build it
+(Visual Studio + CMake, see [`credential_provider/README.md`](credential_provider/README.md))
+or drop one built elsewhere into `credential_provider\`.
 
-- **No prebuilt .exe installer is published for this fork.** The pipeline
-  exists (`installer/build.py`, `.github/workflows/release.yml` on a `v*`
-  tag) but unsigned PyInstaller binaries get quarantined by antivirus — see
-  [`INSTALL.md`](INSTALL.md) for the evidence and the SignPath route.
-- Automatic update checks are **off** unless you set
-  `FACE_UNLOCK_UPDATE_REPO=owner/repo` to your own fork.
-- The lock-screen tile needs `FaceCredentialProvider.dll`. Either build it
-  (Visual Studio + CMake, see [`credential_provider/README.md`](credential_provider/README.md))
-  or drop a DLL built elsewhere into `credential_provider\`.
+Update checks hit this repo's releases; set `FACE_UNLOCK_UPDATE_REPO=` (empty)
+to switch them off, or point it at your own fork.
 
 ## Architecture
 

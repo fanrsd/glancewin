@@ -35,11 +35,11 @@ from face_service.i18n import t
 
 log = logging.getLogger(__name__)
 
-# This fork publishes no releases, and upstream's installer carries the old
-# DeepFace/torch stack plus a different Credential Provider CLSID — pulling
-# it would clobber this build. Point the updater at your own repo with
-# FACE_UNLOCK_UPDATE_REPO="owner/repo" to switch it back on.
-_UPDATE_REPO = os.environ.get("FACE_UNLOCK_UPDATE_REPO", "").strip()
+# This fork's own releases. NEVER upstream: its installer carries the old
+# DeepFace/torch stack plus a different Credential Provider CLSID, so an
+# "update" from there would clobber this build. Override with
+# FACE_UNLOCK_UPDATE_REPO="owner/repo", or set it empty to disable checks.
+_UPDATE_REPO = os.environ.get("FACE_UNLOCK_UPDATE_REPO", "fanrsd/glancewin").strip()
 RELEASES_LATEST_URL = (
     f"https://api.github.com/repos/{_UPDATE_REPO}/releases/latest"
     if "/" in _UPDATE_REPO else ""
