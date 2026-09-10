@@ -49,7 +49,7 @@ double-click it. 87 MB, bundles Python, OpenCV, the three ONNX models and
 the Credential Provider DLL. Verify it first if you like:
 
 ```powershell
-(Get-FileHash .\WindowsFaceUnlock-Setup-0.2.1.exe -Algorithm SHA256).Hash
+(Get-FileHash .\WindowsFaceUnlock-Setup-0.2.2.exe -Algorithm SHA256).Hash
 # compare with the .sha256 asset next to it
 ```
 
@@ -83,18 +83,42 @@ to switch them off, or point it at your own fork.
 
 ## Code signing policy
 
-**Current status: releases are not code signed.** Verify a download by its
-SHA-256 instead — every release ships a `.sha256` asset next to the
-installer, generated in the same GitHub Actions run that built it:
+Releases from `v0.2.2` on are **Authenticode-signed with this project's own
+self-signed certificate** (`CN=GlanceWin Face Unlock, O=fanrsd`,
+thumbprint `F9670BAF0A346243C4AF46094FEEA44AA3242B1E`), RFC-3161 timestamped
+so the signature outlives the certificate. The release job fails rather than
+publishing an unsigned or untimestamped installer.
+
+A self-signed certificate chains to no public CA, so **it is trusted only on
+machines where you import it**. On each of your machines, from an
+Administrator PowerShell:
 
 ```powershell
-(Get-FileHash .\WindowsFaceUnlock-Setup-0.2.1.exe -Algorithm SHA256).Hash
+.\tools\trust-signing-cert.ps1 -CerPath .\glancewin-signing.cer
+```
+
+That imports the *public* certificate into `LocalMachine\Root` and
+`LocalMachine\TrustedPublisher`; `Get-AuthenticodeSignature` on the installer
+then reads `Valid` instead of `UnknownError`, and SmartScreen stops warning.
+Undo with `-Remove`. Never import the `.pfx` — that is the private key.
+
+Elsewhere the signature proves nothing, so verify by SHA-256; every release
+ships a `.sha256` asset generated in the same run that built the installer:
+
+```powershell
+(Get-FileHash .\WindowsFaceUnlock-Setup-0.2.2.exe -Algorithm SHA256).Hash
 ```
 
 Builds are produced only by
 [`.github/workflows/release.yml`](.github/workflows/release.yml) on
 GitHub-hosted runners from a `v*` tag; nothing is uploaded from a developer
-machine.
+machine. The signing key lives in the repository's Actions secrets
+(`SIGNING_PFX_BASE64`, `SIGNING_PFX_PASSWORD`).
+
+Not using SignPath Foundation: their conditions require a signed-fork chain
+this project cannot show — the repo is not a GitHub fork of upstream, and
+upstream publishes no signed builds. A publicly trusted signature would need
+a paid certificate (e.g. Azure Trusted Signing).
 
 Team roles: this is a single-maintainer project —
 [fanrsd](https://github.com/fanrsd) is author, reviewer and release approver.
