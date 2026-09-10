@@ -81,6 +81,30 @@ or drop one built elsewhere into `credential_provider\`.
 Update checks hit this repo's releases; set `FACE_UNLOCK_UPDATE_REPO=` (empty)
 to switch them off, or point it at your own fork.
 
+## Code signing policy
+
+**Current status: releases are not code signed.** Verify a download by its
+SHA-256 instead — every release ships a `.sha256` asset next to the
+installer, generated in the same GitHub Actions run that built it:
+
+```powershell
+(Get-FileHash .\WindowsFaceUnlock-Setup-0.2.1.exe -Algorithm SHA256).Hash
+```
+
+Builds are produced only by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) on
+GitHub-hosted runners from a `v*` tag; nothing is uploaded from a developer
+machine.
+
+Team roles: this is a single-maintainer project —
+[fanrsd](https://github.com/fanrsd) is author, reviewer and release approver.
+
+Privacy: the program transfers no information to other systems, with one
+exception — the tray checks `api.github.com` for a newer release. Disable it
+by setting `FACE_UNLOCK_UPDATE_REPO=` (empty). Your face embeddings and
+Windows password never leave your machine: they live in
+`%USERPROFILE%\.face-unlock\`, DPAPI-encrypted for your user account.
+
 ## Architecture
 
 An open-source, auditable replacement for closed-source webcam-login utilities
