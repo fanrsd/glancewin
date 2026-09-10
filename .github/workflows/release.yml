@@ -1,14 +1,16 @@
 name: release
 
 # Builds and releases the Windows installer whenever a `v*` tag is pushed.
-# If the repo has configured the SIGNPATH_* secrets, the installer is
-# code-signed through SignPath.io's free open-source program. Otherwise
-# the unsigned installer is published directly (users will see a
-# SmartScreen "unknown publisher" prompt the first time they run it —
-# README documents how to bypass).
+# With the SIGNING_PFX_* secrets set the installer is Authenticode-signed
+# with the project's own certificate; without them it ships unsigned and
+# SmartScreen says "unknown publisher".
 #
-#     git tag v0.1.0
-#     git push origin v0.1.0
+# The certificate is self-signed, so it is only trusted on machines that
+# imported it (tools\trust-signing-cert.ps1) — good enough for a private
+# fleet, worth nothing to strangers.
+#
+#     git tag v0.2.2
+#     git push fork v0.2.2
 # ...triggers this workflow.
 
 on:
@@ -24,10 +26,9 @@ jobs:
     name: Build + (optional) sign Windows installer
     runs-on: windows-2022
     timeout-minutes: 75
-    env:
-      SIGNPATH_API_TOKEN:    ${{ secrets.SIGNPATH_API_TOKEN }}
-      SIGNPATH_ORG_ID:       ${{ secrets.SIGNPATH_ORG_ID }}
-      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+    # SIGNING_PFX_BASE64 / SIGNING_PFX_PASSWORD: self-signed certificate made
+    # by tools\make-signing-cert.ps1 and uploaded by tools\push-signing-secrets.ps1.
+    # Absent -> the installer is published unsigned.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,39 +85,32 @@ jobs:
         shell: powershell
         run: python installer\build.py
 
-      - name: Detect SignPath config
-        id: signcheck
+      - name: Sign installer
         shell: powershell
+        env:
+          PFX_B64: ${{ secrets.SIGNING_PFX_BASE64 }}
+          PFX_PW:  ${{ secrets.SIGNING_PFX_PASSWORD }}
         run: |
-          if ($env:SIGNPATH_API_TOKEN -and $env:SIGNPATH_ORG_ID -and $env:SIGNPATH_PROJECT_SLUG) {
-            "have_signpath=true"  | Out-File -Append $env:GITHUB_OUTPUT
-            Write-Host "SignPath secrets detected — installer will be signed."
-          } else {
-            "have_signpath=false" | Out-File -Append $env:GITHUB_OUTPUT
-            Write-Host "SignPath secrets absent — publishing unsigned installer."
+          if (-not $env:PFX_B64) {
+            Write-Host "No SIGNING_PFX_BASE64 secret - publishing unsigned."
+            exit 0
           }
-
-      - name: Upload unsigned installer for SignPath
-        if: steps.signcheck.outputs.have_signpath == 'true'
-        id: upload_unsigned
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer-unsigned
-          path: installer_output\WindowsFaceUnlock-Setup-*.exe
-          retention-days: 1
-
-      - name: Submit to SignPath
-        if: steps.signcheck.outputs.have_signpath == 'true'
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
-          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: release-signing
-          github-artifact-id: ${{ steps.upload_unsigned.outputs.artifact-id }}
-          artifact-configuration-slug: installer
-          wait-for-completion: true
-          output-artifact-directory: installer_output
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          try {
+            Get-ChildItem installer_output\WindowsFaceUnlock-Setup-*.exe | ForEach-Object {
+              & .\tools\sign-file.ps1 -Path $_.FullName -PfxPath $pfx -Password $env:PFX_PW
+            }
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+          # A signature that did not land must fail the release, not ship quietly.
+          Get-ChildItem installer_output\WindowsFaceUnlock-Setup-*.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            Write-Host "$($_.Name): $($sig.Status) / $($sig.SignerCertificate.Subject)"
+            if (-not $sig.SignerCertificate) { throw "no signature on $($_.Name)" }
+            if (-not $sig.TimeStamperCertificate) { throw "no RFC-3161 timestamp on $($_.Name)" }
+          }
 
       - name: Regenerate checksum (covers signed & unsigned)
         shell: powershell

@@ -37,3 +37,4 @@ installer_output/
 
 # Downloaded test fixtures (tools/check_liveness.py)
 .cache/
+signing/
