@@ -275,6 +275,7 @@ _EN: dict[str, str] = {
     "enroll.confirm.wipe.title": "Delete enrollment?",
     "enroll.confirm.wipe.body": "This will delete all saved enrollment photos and embeddings. Continue?",
     "enroll.error.camera": "Cannot open the camera. Close any other app using it and retry.",
+    "enroll.error.dark": "The camera opens but only sends black frames. Check the privacy shutter over the lens, and the camera key on your keyboard (often F10 on ASUS laptops), then close and reopen this window.",
     "enroll.error.service_busy": "Could not pause the Face Unlock service — enrollment may conflict with probes.",
     "enroll.status.waiting": "Waiting for face…",
     "enroll.status.ready": "Face detected — ready",

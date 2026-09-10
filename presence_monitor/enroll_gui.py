@@ -179,12 +179,21 @@ class EnrollWindow:
         self.progress_var.set(f"{self._captured}/{self._target}")
 
     def _acquire_camera_lease(self) -> bool:
+        """Ask the service to let go of the webcam.
+
+        ``pipe_call`` returns None when the service is not running at all —
+        then there is nothing to conflict with and nothing to warn about.
+        Only a service that answers and refuses is worth a dialog.
+        """
         resp = pipe_call(
             {"cmd": "pause_camera", "seconds": CAMERA_LEASE_S},
             timeout_s=3.0,
         )
-        if not (resp and resp.get("ok")):
-            log.warning("could not pause face_service camera: %s", resp)
+        if resp is None:
+            log.info("face_service not running; enrolling with the camera to ourselves")
+            return True
+        if not resp.get("ok"):
+            log.warning("service refused to release the camera: %s", resp)
             messagebox.showwarning(
                 t("enroll.title"),
                 t("enroll.error.service_busy"),
@@ -219,6 +228,8 @@ class EnrollWindow:
 
         try:
             frame_idx = 0
+            dark_streak = 0
+            warned_dark = False
             faces: list[tuple[int, int, int, int]] = []
             while not self._stop.is_set():
                 ok, frame = cap.read()
@@ -226,6 +237,19 @@ class EnrollWindow:
                     time.sleep(0.05)
                     continue
                 frame_idx += 1
+
+                # A UVC camera whose privacy shutter is closed, or whose
+                # hardware kill switch is on, still opens and still streams -
+                # it just streams black. Say so instead of showing a black
+                # preview and letting the user wonder.
+                if not warned_dark:
+                    dark_streak = dark_streak + 1 if float(frame.mean()) < 5.0 else 0
+                    if dark_streak >= 40:
+                        warned_dark = True
+                        self.root.after(0, lambda: messagebox.showwarning(
+                            t("enroll.title"), t("enroll.error.dark"),
+                            parent=self.root,
+                        ))
 
                 # Detect every few frames to save CPU but still feel live.
                 if frame_idx % DETECT_EVERY_N_FRAMES == 0:
