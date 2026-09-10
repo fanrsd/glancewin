@@ -31,16 +31,18 @@ from .theme import apply_theme
 
 log = logging.getLogger(__name__)
 
+# In a frozen build __file__ lives inside _internal\, while the installer
+# lays the DLL, register.ps1 and the service exe next to the tray exe.
+FROZEN = bool(getattr(sys, "frozen", False))
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CP_DIR = REPO_ROOT / "credential_provider"
-# build\Release is where CMake puts it; the flat path is for a DLL handed
-# over from another machine (copying a repo rarely includes build\).
+APP_ROOT = Path(sys.executable).resolve().parent if FROZEN else REPO_ROOT
+CP_DIR = APP_ROOT / "credential_provider"
 _CP_CANDIDATES = (
-    CP_DIR / "build" / "Release" / "FaceCredentialProvider.dll",
-    CP_DIR / "FaceCredentialProvider.dll",
+    CP_DIR / "FaceCredentialProvider.dll",                      # installed / handed over
+    CP_DIR / "build" / "Release" / "FaceCredentialProvider.dll",  # CMake output
 )
 CP_DLL = next((p for p in _CP_CANDIDATES if p.exists()), _CP_CANDIDATES[0])
-REGISTER_PS1 = REPO_ROOT / "credential_provider" / "register.ps1"
+REGISTER_PS1 = CP_DIR / "register.ps1"
 CLSID = "{F50C7625-CF2E-4572-A0CB-BCF578F9BECA}"
 
 OK = "\u2713"      # check mark
@@ -247,8 +249,14 @@ class ModelsStep(Step):
         self._head()
         row = ttk.Frame(self.frame)
         row.pack(anchor="w")
-        self.btn = ttk.Button(row, text=t("wiz.models.btn"), command=self._download)
-        self.btn.pack(side="left")
+        # A frozen build ships the models inside itself; there is no
+        # download_weights.py to run and no interpreter to run it with.
+        if not FROZEN:
+            self.btn = ttk.Button(row, text=t("wiz.models.btn"),
+                                  command=self._download)
+            self.btn.pack(side="left")
+        ttk.Button(row, text=t("wiz.recheck"),
+                   command=self.refresh).pack(side="left", padx=6)
         self._status_row()
 
     def probe(self) -> tuple[bool, str]:
@@ -364,12 +372,22 @@ class AutostartStep(Step):
 
     def _register(self) -> None:
         self.status.set(t("wiz.task.running"))
-        pyw = REPO_ROOT / ".venv" / "Scripts" / "pythonw.exe"
-        exe = str(pyw if pyw.exists() else Path(sys.executable))
+        if FROZEN:
+            # Installed build: face_service.exe sits next to the tray exe.
+            # "-m face_service" means nothing to a frozen entry point.
+            exe, args, workdir = str(APP_ROOT / "face_service.exe"), "", APP_ROOT
+        else:
+            pyw = REPO_ROOT / ".venv" / "Scripts" / "pythonw.exe"
+            exe = str(pyw if pyw.exists() else Path(sys.executable))
+            args = "-m face_service"
+            workdir = REPO_ROOT
+        action = f"$a = New-ScheduledTaskAction -Execute '{exe}'"
+        if args:
+            action += f" -Argument '{args}'"
+        action += f" -WorkingDirectory '{workdir}';"
         script = (
-            f"$a = New-ScheduledTaskAction -Execute '{exe}' "
-            f"-Argument '-m face_service' -WorkingDirectory '{REPO_ROOT}';"
-            f"$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;"
+            action +
+            "$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;"
             "$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME "
             "-LogonType Interactive -RunLevel Limited;"
             "$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
